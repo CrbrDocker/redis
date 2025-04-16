@@ -1,0 +1,16 @@
+FROM crbrdocker/debian:bookworm
+
+COPY --chmod=755 ./install-redis.sh /install-redis.sh
+RUN /install-redis.sh && rm -f /install-redis.sh
+
+
+VOLUME /srv/data/redis
+WORKDIR /srv/data/redis
+
+STOPSIGNAL SIGTERM
+
+EXPOSE 6379/tcp
+
+#ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+#CMD ["bash", "-c", "crbr-redis_pre_start.sh && exec redis-server /etc/redis/redis.conf '*:6379'"]
+CMD ["crbr-redis-start.sh"]
