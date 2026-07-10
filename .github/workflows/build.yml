@@ -9,6 +9,11 @@ on:
   schedule:
     - cron: "20 8 * * 2"   # Tuesday 08:20 UTC — a few hours after the base image build (04:17)
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Force rebuild even if the gate says nothing changed"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -51,7 +56,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: g
-        run: IMAGE="${GHCR_IMAGE}:latest" VCS_REF="${{ github.sha }}" BASE_IMAGE="${BASE_IMAGE}" ./need_rebuild.sh
+        env:
+          FORCE: ${{ github.event.inputs.force }}
+        run: |
+          set -uo pipefail
+          if [ "$FORCE" = "true" ]; then
+            echo "manual run with force=true — skipping gate, building"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          IMAGE="${GHCR_IMAGE}:latest" VCS_REF="${{ github.sha }}" BASE_IMAGE="${BASE_IMAGE}" ./need_rebuild.sh
 
   # --------------------------------------------------------------------------
   # Build natively per arch and push per-arch tags.

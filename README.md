@@ -41,7 +41,8 @@ Everything is driven by `.github/workflows/build.yml`:
 5. **cleanup** — prunes untagged GHCR versions.
 
 Triggers: any push to `main`, weekly `cron 20 8 * * 2`, or manual *Run
-workflow*.
+workflow* (with a `force` toggle, default on, to build even when the gate sees
+no change).
 
 ### Rebuild gate
 
