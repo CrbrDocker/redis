@@ -40,7 +40,7 @@ Everything is driven by `.github/workflows/build.yml`:
    `docker buildx imagetools create`.
 5. **cleanup** — prunes untagged GHCR versions.
 
-Triggers: any push to `main`, weekly `cron 20 4 * * 2`, or manual *Run
+Triggers: any push to `main`, weekly `cron 20 8 * * 2`, or manual *Run
 workflow*.
 
 ### Rebuild gate
