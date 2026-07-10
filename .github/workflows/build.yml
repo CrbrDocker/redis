@@ -1,0 +1,168 @@
+name: build-redis
+
+# Weekly rebuild of the redis image, plus pushes and manual runs. The gate
+# keeps a scheduled run from rebuilding/pushing when nothing changed (no new
+# commit, same base digest, no pending APT updates).
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "20 4 * * 2"   # Tuesday, staggered after the base image (17)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BASE_IMAGE: crbrdocker/debian:stable
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Lowercase the owner once (OCI rejects uppercase in image paths).
+  # --------------------------------------------------------------------------
+  prep:
+    runs-on: ubuntu-24.04
+    outputs:
+      owner: ${{ steps.p.outputs.owner }}
+    steps:
+      - id: p
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+  # --------------------------------------------------------------------------
+  # Gate: rebuild only when something actually changed.
+  # --------------------------------------------------------------------------
+  gate:
+    needs: prep
+    runs-on: ubuntu-24.04
+    outputs:
+      build: ${{ steps.g.outputs.build }}
+    env:
+      GHCR_IMAGE: ghcr.io/${{ needs.prep.outputs.owner }}/redis
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: g
+        run: IMAGE="${GHCR_IMAGE}:latest" VCS_REF="${{ github.sha }}" BASE_IMAGE="${BASE_IMAGE}" ./need_rebuild.sh
+
+  # --------------------------------------------------------------------------
+  # Build natively per arch and push per-arch tags.
+  # --------------------------------------------------------------------------
+  build:
+    needs: [prep, gate]
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ${{ matrix.arch.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - { name: amd64, runner: ubuntu-24.04 }
+          - { name: arm64, runner: ubuntu-24.04-arm }
+    env:
+      GHCR_IMAGE: ghcr.io/${{ needs.prep.outputs.owner }}/redis
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/redis
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
+      - name: Build & push per-arch image (OCI + attestations)
+        env:
+          ARCH_NAME: ${{ matrix.arch.name }}
+          VCS_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          base_digest=$(docker buildx imagetools inspect "$BASE_IMAGE" --format '{{ .Manifest.Digest }}')
+          tags=(-t "${GHCR_IMAGE}:latest-${ARCH_NAME}")
+          [ -n "$DOCKERHUB_USERNAME" ] && tags+=(-t "${DOCKERHUB_IMAGE}:latest-${ARCH_NAME}")
+          docker buildx build . -f Dockerfile \
+            --platform "linux/${ARCH_NAME}" \
+            "${tags[@]}" \
+            --output type=image,oci-mediatypes=true,push=true \
+            --attest type=provenance,mode=max \
+            --attest type=sbom \
+            --build-arg "IMAGE_VERSION=latest" \
+            --build-arg "IMAGE_REVISION=${VCS_REF}" \
+            --build-arg "IMAGE_CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --build-arg "IMAGE_SOURCE=${SOURCE_URL}" \
+            --build-arg "BASE_DIGEST=${base_digest}"
+
+  # --------------------------------------------------------------------------
+  # Merge the per-arch tags into :latest, per registry.
+  # --------------------------------------------------------------------------
+  manifest:
+    needs: [prep, gate, build]
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      GHCR_IMAGE: ghcr.io/${{ needs.prep.outputs.owner }}/redis
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/redis
+      SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Log in to Docker Hub
+        if: env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ env.DOCKERHUB_TOKEN }}
+      - name: Create multi-arch manifests
+        run: |
+          set -euo pipefail
+          push_manifest() {  # $1 = image repo
+            local repo="$1"
+            docker buildx imagetools create \
+              --annotation "index:org.opencontainers.image.description=Redis on the crbr Debian base image" \
+              --annotation "index:org.opencontainers.image.source=${SOURCE_URL}" \
+              -t "${repo}:latest" \
+              "${repo}:latest-amd64" "${repo}:latest-arm64"
+          }
+          push_manifest "$GHCR_IMAGE"
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            push_manifest "$DOCKERHUB_IMAGE"
+          fi
+
+  # --------------------------------------------------------------------------
+  # Prune untagged GHCR versions left behind by overwritten tags (multi-arch
+  # aware). Docker Hub is tag-centric and self-GCs.
+  # --------------------------------------------------------------------------
+  cleanup:
+    needs: [prep, gate, manifest]
+    if: needs.gate.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Prune untagged GHCR versions
+        uses: dataaxiom/ghcr-cleanup-action@v1.2.2
+        with:
+          owner: ${{ needs.prep.outputs.owner }}
+          packages: redis
+          delete-untagged: true
+          token: ${{ secrets.GITHUB_TOKEN }}

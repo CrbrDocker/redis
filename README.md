@@ -1,35 +1,58 @@
-#* Redis
+# redis
 
-## Build
-Note : depend de buildx (cross platform build) & la VM de base Debian Bookworm.
+Minimal **redis** image built on top of the crbr Debian base
+(`crbrdocker/debian:stable`), multi-arch (`amd64` + `arm64`), published by CI to
+**GHCR** (`ghcr.io/crbrdocker/redis`) and **Docker Hub** (`crbrdocker/redis`).
+Rebuilt weekly, but only when something changed. The previous manual
+implementation is archived verbatim under `OLD/`.
 
-*** Les fichiers
-- DockerFileRedis : le dockerfile... pour lancer le build
-- install-redis.sh : fichier d'install de l'image. Il est copie et execute dans l'image pendant le build
-- ./need_rebuild.sh : script qui permet de checker les modification et rebuilder au cas ou, si il y a eu des modifications ou des packages � updater. possiblement automatisable periodiquement.
+## Usage
 
-### Build : 
-
-#### Build de test : 
 ```
-docker build --no-cache -f DockerFileRedis -t monimagedetest .
+docker run --rm -p 6379:6379 crbrdocker/redis
 ```
-... et ensuite, on peut la run
 
-PS : penser à tout cleaner prune & co avant de lancer le build final.
+- **Persistent data** lives in the volume **`/srv/data/redis`** (the DB — RDB +
+  AOF). If nothing is mounted, an anonymous volume is created automatically;
+  mount a host path or named volume to persist across container recreation.
+- **`--privileged`** (or `--sysctl vm.overcommit_memory=1`) is recommended: the
+  start script tries to set `vm.overcommit_memory=1` and raise the open-files
+  limit, but degrades gracefully without it.
 
-
-#### Build final, pushé sur le repo : 
 ```
-docker buildx build --no-cache --platform linux/amd64,linux/arm64 -f DockerFileRedis -t crbrdocker/redis . --push
+docker run --rm --privileged -p 6379:6379 -v redis-data:/srv/data/redis crbrdocker/redis
 ```
-Attention, il faut le lancer imperativement dans le repertoire ici, sinon des problemes de path
-(note, on doit le pusher avec buildx directement, sinon ca ne met pas l'image a dispo, ca la laisse juste dans le cache de build) 
 
-#### Automatisation build : 
-le script ./need_rebuild.sh peut tout faire. Il faut le lancer imperativement dans le repertoire ici, sinon des problemes de path
+Config baked at `/etc/redis/redis.conf` (`maxmemory 2gb`,
+`maxmemory-policy volatile-lru`, `appendonly yes`, …); override by replacing that
+file. Logs go to `/srv/log/redis` and are cleared on each start.
 
-** Utilisation
-Juste docker run ... 
+## How it is built
 
-Un volume : /srv/data/redis qui va contenir la base de donn�e persistante de redis (si on ne donne rien au run, il est cr�� automatiquement).
+Everything is driven by `.github/workflows/build.yml`:
+
+1. **prep** — lowercases the registry owner (OCI rejects uppercase).
+2. **gate** — `need_rebuild.sh` decides whether a rebuild is warranted.
+3. **build** — matrix `arch × {amd64→ubuntu-24.04, arm64→ubuntu-24.04-arm}`,
+   **native, no QEMU**; `docker buildx build` pushes an OCI `:latest-<arch>`
+   image (with provenance + SBOM) to both registries.
+4. **manifest** — merges the per-arch tags into `:latest` via
+   `docker buildx imagetools create`.
+5. **cleanup** — prunes untagged GHCR versions.
+
+Triggers: any push to `main`, weekly `cron 20 4 * * 2`, or manual *Run
+workflow*.
+
+### Rebuild gate
+
+`need_rebuild.sh <image-ref> [vcs-ref] [base-image]` prints `REBUILD=true|false`.
+It rebuilds when the published image is missing, its
+`org.opencontainers.image.revision` label ≠ HEAD, the base `:stable` digest it
+was built on has changed, or a simulated `dist-upgrade` shows pending updates.
+
+## Registries & secrets
+
+- GHCR uses the built-in `GITHUB_TOKEN` (needs `packages: write`) — no secret.
+- Docker Hub is conditional on secrets `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`;
+  namespace is repo/org var `DOCKERHUB_NAMESPACE` (falls back to the username).
+  Absent creds → GHCR-only.

@@ -5,10 +5,9 @@
 
 
 
-
 # APT
 
-# env var pour que APT sache qu'on ne va pas lui répondre
+# env var pour que APT sache qu'on ne va pas lui rÃ©pondre
 export DEBIAN_FRONTEND=noninteractive
 export DEBIAN_PRIORITY=critical
 apt -y update
@@ -17,7 +16,7 @@ apt-get -y install --no-install-recommends redis-server redis-tools
 
 
 
-# Conf redis (on crée juste les repertoires, tout peut être vide)
+# Conf redis (on crÃ©e juste les repertoires, tout peut Ãªtre vide)
 mkdir -p /srv/data /srv/log
 mv /var/log/redis /srv/log && ln -s /srv/log/redis /var/log && rm -rf /srv/log/redis/* 2>/dev/null
 mv /srv/data/redis /srv/data && ln -s /srv/data/redis /var/lib && rm -rf /srv/data/redis/* 2>/dev/null
@@ -82,10 +81,10 @@ EOF
 cat > /usr/local/bin/crbr-redis-start.sh <<'EOF'
 #!/bin/bash
 
-# On crée si ca n'existe pas
+# On crÃ©e si ca n'existe pas
 mkdir -p /srv/data/redis /srv/log/redis 2>/dev/null || true
 chown redis:redis /srv/data/redis /srv/log/redis
-# Note : pas grave si c'est vide, Redis crée ses fichiers.
+# Note : pas grave si c'est vide, Redis crÃ©e ses fichiers.
 
 # Clean des ancien logs
 rm -rf /srv/log/redis/* 2> /dev/null || true
@@ -93,7 +92,7 @@ rm -rf /srv/log/redis/* 2> /dev/null || true
 # Limite fichiers ouverts
 ulimit -n 65535
 
-# Truc de mémoire pour redis (note : le container doit être lancé avec --privileged
+# Truc de mÃ©moire pour redis (note : le container doit Ãªtre lancÃ© avec --privileged
 sysctl -w vm.overcommit_memory=1 2> /dev/null || true
 
 exec redis-server /etc/redis/redis.conf
@@ -101,7 +100,7 @@ exec redis-server /etc/redis/redis.conf
 EOF
 chmod 755 /usr/local/bin/crbr-redis-start.sh
 
-# Nettoyage du cache APT 
+# Nettoyage du cache APT
 apt-get clean
 apt-get autoclean
 
@@ -114,4 +113,3 @@ rm -rf /var/cache/apt/*pkgcache.bin 2>/dev/null
 # Clean des conneries avant de clore l'image
 rm -rf /tmp/* /var/tmp/* 2> /dev/null
 find /var/log -type f -delete 2> /dev/null
-
