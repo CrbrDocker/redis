@@ -12,20 +12,31 @@ implementation is archived verbatim under `OLD/`.
 docker run --rm -p 6379:6379 crbrdocker/redis
 ```
 
-- **Persistent data** lives in the volume **`/srv/data/redis`** (the DB — RDB +
-  AOF). If nothing is mounted, an anonymous volume is created automatically;
-  mount a host path or named volume to persist across container recreation.
 - **`--privileged`** (or `--sysctl vm.overcommit_memory=1`) is recommended: the
   start script tries to set `vm.overcommit_memory=1` and raise the open-files
   limit, but degrades gracefully without it.
+- **Persist data** by mounting a volume at `/srv/data/redis` (see below).
 
 ```
 docker run --rm --privileged -p 6379:6379 -v redis-data:/srv/data/redis crbrdocker/redis
 ```
 
-Config baked at `/etc/redis/redis.conf` (`maxmemory 2gb`,
-`maxmemory-policy volatile-lru`, `appendonly yes`, …); override by replacing that
-file. Logs go to `/srv/log/redis` and are cleared on each start.
+## Configuration & data
+
+- **Config file** — baked at **`/etc/redis/redis.conf`** (defaults: `maxmemory 2gb`,
+  `maxmemory-policy volatile-lru`, `appendonly yes`, `protected-mode no`,
+  `daemonize no`, `logfile ""` → stdout, `dir /srv/data/redis`, …). Override the
+  whole file by mounting your own on top of it:
+  ```
+  docker run -v ./redis.conf:/etc/redis/redis.conf:ro ... crbrdocker/redis
+  ```
+- **Data directory** — **`/srv/data/redis`** (the `dir` in the config — RDB dump +
+  AOF). Declared as a `VOLUME`; mount a host path or named volume there to persist
+  across container recreation (an anonymous volume is used if you mount nothing):
+  ```
+  docker run -v redis-data:/srv/data/redis ... crbrdocker/redis
+  ```
+- **Logs** — container **stdout** (`logfile ""`), so `docker logs` shows them.
 
 ## How it is built
 
