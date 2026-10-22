@@ -24,7 +24,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BASE_IMAGE: crbrdocker/debian:stable
+  BASE_IMAGE: ghcr.io/crbrdocker/debian:stable   # base pulled from GHCR: Docker Hub pulls are rate-limited
 
 jobs:
   # --------------------------------------------------------------------------
@@ -119,7 +119,8 @@ jobs:
             --build-arg "IMAGE_REVISION=${VCS_REF}" \
             --build-arg "IMAGE_CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --build-arg "IMAGE_SOURCE=${SOURCE_URL}" \
-            --build-arg "BASE_DIGEST=${base_digest}"
+            --build-arg "BASE_DIGEST=${base_digest}" \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}"
 
   # --------------------------------------------------------------------------
   # Merge the per-arch tags into :latest, per registry.
@@ -188,6 +189,8 @@ jobs:
   # amd64 and arm64 differ). Tags are read live from Docker Hub and grouped by
   # digest, so aliases share one section. Runs on every run, so the page always
   # matches what is live — even when nothing was rebuilt.
+  # Image data is read from GHCR (same images; Docker Hub pulls are rate-
+  # limited), the tag list from Docker Hub's web API (not counted as pulls).
   # --------------------------------------------------------------------------
   describe:
     needs: [prep, manifest]
@@ -195,17 +198,16 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      GHCR_IMAGE: ghcr.io/${{ needs.prep.outputs.owner }}/redis
       DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/redis
       SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}
       KEY_PACKAGES: "redis-server openssl"   # packages given their own summary column
     steps:
-      - name: Log in to Docker Hub
-        if: env.DOCKERHUB_USERNAME != ''
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Generate overview
         if: env.DOCKERHUB_USERNAME != ''
         run: |
@@ -267,7 +269,7 @@ jobs:
               | sort_by(if (.tags | index("latest")) then 0 else 1 end, .tags[0]) | .[]')
           while read -r g; do
             [ -n "$g" ] || continue
-            ref="${DOCKERHUB_IMAGE}@$(jq -r .digest <<<"$g")"
+            ref="${GHCR_IMAGE}:$(jq -r '.tags[0]' <<<"$g")"
             title=$(jq -r '.tags | map("`:\(.)`") | join(" · ")' <<<"$g")
             sbom=$(inspect "$ref" '{{ json .SBOM }}')
             built=$(inspect "$ref" '{{ json .Image }}' \

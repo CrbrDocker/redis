@@ -2,7 +2,9 @@
 # Built and pushed by .github/workflows/build.yml (native per-arch, OCI +
 # provenance + SBOM). BASE_DIGEST records the exact base index the image was
 # built from so the rebuild gate can detect a refreshed base.
-FROM crbrdocker/debian:stable
+ARG BASE_IMAGE=ghcr.io/crbrdocker/debian:stable
+FROM ${BASE_IMAGE}
+ARG BASE_IMAGE
 ARG IMAGE_VERSION=""
 ARG IMAGE_REVISION=""
 ARG IMAGE_CREATED=""
@@ -18,7 +20,7 @@ LABEL org.opencontainers.image.title="redis" \
       org.opencontainers.image.revision="${IMAGE_REVISION}" \
       org.opencontainers.image.created="${IMAGE_CREATED}" \
       org.opencontainers.image.source="${IMAGE_SOURCE}" \
-      org.opencontainers.image.base.name="crbrdocker/debian:stable" \
+      org.opencontainers.image.base.name="${BASE_IMAGE}" \
       org.opencontainers.image.base.digest="${BASE_DIGEST}"
 
 VOLUME /srv/data/redis
