@@ -50,6 +50,10 @@ Everything is driven by `.github/workflows/build.yml`:
 4. **manifest** — merges the per-arch tags into `:latest` via
    `docker buildx imagetools create`.
 5. **cleanup** — prunes untagged GHCR versions.
+6. **describe** — regenerate the Docker Hub overview: a short intro linking here,
+   a summary row per published image, and the exact version of every installed
+   package, read from its SBOM attestation (per arch when they differ). Runs on
+   every run.
 
 Triggers: any push to `main`, weekly `cron 20 8 * * 2`, or manual *Run
 workflow* (with a `force` toggle, default on, to build even when the gate sees
@@ -68,3 +72,6 @@ was built on has changed, or a simulated `dist-upgrade` shows pending updates.
 - Docker Hub is conditional on secrets `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`;
   namespace is repo/org var `DOCKERHUB_NAMESPACE` (falls back to the username).
   Absent creds → GHCR-only.
+- The Docker Hub overview is **generated** (edits made on Hub are overwritten); it
+  needs `DOCKERHUB_TOKEN` with Read/Write/Delete scope, and the user must be Admin
+  on the repo when the namespace is an organization.
